@@ -1,98 +1,188 @@
 # Everything Search Skill for AI Agents
 
-> ⚡ **Ultra-fast, index-powered local file search skill for AI coding agents (Cursor, Codex, PI-Desktop, Claude Desktop, etc.) powered by Voidtools Everything.**
+<p align="center">
+  <strong>⚡ Ultra-fast, index-powered local file search skill for AI coding agents.</strong><br>
+  <span>Compatible with Cursor, Codex, PI-Desktop, Claude Desktop, and CLI agent environments.</span>
+</p>
 
-[English](#features) | [中文说明](#特性亮点)
-
----
-
-## 特性亮点 / Features
-
-- 🚀 **毫秒级极速检索 (Millisecond Latency)**：基于 Voidtools Everything 的 NTFS/USN 实时索引，告别深度递归遍历和卡顿的目录遍历。
-- 🎯 **全局或范围限定 (Scoped or Full-Drive)**：支持全盘扫描，也支持使用 `-path` 精确限定在当前代码仓库或特定子目录。
-- 🛡️ **智能上下文保护 (Context Safe)**：默认强制返回结果限制（`-n`），避免一次性吐出几十万行路径打爆 Agent 的 Token 上下文。
-- 📊 **结构化输出支持 (JSON / CSV)**：附带专用的 PowerShell 与 Python 脚本包装器，可输出结构化 JSON 供脚本和 Agent 精确解析。
-- 🧩 **多环境开箱即用 (Universal Support)**：适配 Cursor、Codex、PI-Desktop、Claude 等多种 Agent Skill 规范。
+<p align="center">
+  <a href="README_zh.md">🇨🇳 简体中文</a> |
+  <a href="README.md">🇬🇧 English</a>
+</p>
 
 ---
 
-## 快速上手 / Quick Start
+## 💡 Why Everything for AI Agents?
 
-### 1. 前置要求 (Prerequisites)
-- Windows 系统已安装并运行 [Everything](https://www.voidtools.com/)。
+Traditional file discovery mechanisms used by AI agents (`Get-ChildItem -Recurse`, `find`, or unbounded globbing) suffer from severe limitations on Windows:
+- **Painfully Slow**: Recursively walking directories with thousands of dependencies (like `node_modules`, `.venv`, or build artifacts) can take tens of seconds or even minutes.
+- **High Resource Usage**: High CPU and disk I/O load while searching.
+- **Context Exhaustion**: Unfiltered tools often accidentally return massive file trees, flooding the LLM's context window and wasting thousands of tokens.
 
-### 2. 一键安装 (Installation)
+**The Solution:**
+[Voidtools Everything](https://www.voidtools.com/) indexes NTFS USN Journals in memory. Queries typically execute in **less than 15 milliseconds** with virtually zero CPU footprint. This skill enables agents to leverage this instant index directly and safely.
 
-#### 方式 A：通过 PowerShell 一键配置
-打开 PowerShell 运行：
+---
+
+## ✨ Features
+
+- ⚡ **Sub-15ms Latency**: Real-time indexed file retrieval across all local drives (C:, D:, E:, etc.).
+- 🎯 **Scoped or Whole-Disk**: Search across entire drives or restrict boundaries to the current project/workspace using `-path`.
+- 🛡️ **Context Safe**: Built-in default limit guards (`-n 20`) prevent output dumps from exceeding LLM context windows.
+- 📊 **Dual Script Wrappers**: Includes both PowerShell (`everything_search.ps1`) and Python (`everything_search.py`) helpers with structured `--json` output.
+- 🔌 **Universal Compatibility**: Works out of the box with **Cursor**, **Codex**, **PI-Desktop**, and any custom agent tooling.
+- 📦 **Zero-Config Portable**: Self-contained `es.exe` included with one-click installer.
+
+---
+
+## 🚀 Quick Start
+
+### Prerequisites
+1. Windows 10/11
+2. [Voidtools Everything](https://www.voidtools.com/) installed and running in the background.
+
+### One-Click Installation
+
+Clone and run the automated installer:
+
 ```powershell
 git clone https://github.com/Mayuqi-crypto/everything-search-skill.git
 cd everything-search-skill
 .\scripts\install.ps1
 ```
-该脚本会自动：
-1. 将 `es.exe` 安装至 `~/.local/bin/` 并写入用户 PATH。
-2. 将 Skill 自动同步至 `~/.agents/skills/`、`~/.cursor/skills/` 与 `~/.codex/skills/`。
+
+The installer will:
+1. Copy `es.exe` to `~/.local/bin/es.exe` and add it to your User `PATH`.
+2. Automatically deploy the skill into:
+   - `~/.agents/skills/everything-search/` (PI-Desktop / Agent environment)
+   - `~/.cursor/skills/everything-search/` (Cursor IDE)
+   - `~/.codex/skills/everything-search/` (Codex)
 
 ---
 
-## 常用命令与语法 / Usage Examples
+## 🛠️ Usage & Examples
 
-### 1. 基础命令行调用 (Direct CLI)
+### 1. Direct CLI Usage (`es.exe`)
+
+`es.exe` runs directly from any PowerShell or CMD prompt:
+
 ```powershell
-# 限制 20 条结果搜索
+# Basic search with result count limit (CRITICAL: always use -n)
 es.exe -n 20 "package.json"
 
-# 限定在特定项目目录内搜索
-es.exe -path "C:\workspace\my-project" -n 20 "main.py"
+# Search inside a specific project or workspace folder
+es.exe -path "C:\path\to\repo" -n 20 "main.py"
 
-# 仅搜文件 (/a-d) 或 仅搜文件夹 (/ad)
+# Files only (/a-d) or Folders only (/ad)
 es.exe /a-d -n 15 "ext:tsx component"
 es.exe /ad -n 10 "node_modules"
 
-# 按最后修改时间倒序排列（找出最近改动的文件）
+# Sort by modification date (newest first)
 es.exe -sort-date-modified-descending -n 10 "ext:log"
+
+# Search by file size
+es.exe -sort-size-descending -n 10 "size:>100MB"
 ```
 
-### 2. 高级过滤语法 (Syntax Cheatsheet)
-| 语法 | 说明 | 示例 |
-|---|---|---|
-| `ext:<exts>` | 按文件后缀过滤，分号隔开 | `ext:md;txt;json` |
-| `size:<range>` | 按大小过滤（支持 KB/MB/GB） | `size:>100MB` 或 `size:1MB..10MB` |
-| `dm:<time>` | 按修改时间过滤 | `dm:today`、`dm:last7days`、`dm:2025` |
-| `exact:<name>` | 精确文件名匹配 | `exact:Dockerfile` |
-| `!` | 非（排除） | `*.ts !*.test.ts` |
-| `|` | 或 | `*.jpg | *.png` |
-| `-r` | 正则表达式搜索 | `es.exe -r "src\\components\\.*\.tsx$"` |
+> **Warning**: Always include `-n <count>` (e.g. `-n 20`). Unbounded queries such as `es.exe *.txt` can match hundreds of thousands of files and exhaust the LLM's context.
 
-### 3. 辅助脚本（结构化 JSON 输出）
+---
+
+### 2. Helper Scripts (Structured Output)
+
+#### PowerShell Helper (`scripts/everything_search.ps1`)
+
 ```powershell
-# 使用 PowerShell 脚本获取 JSON 数据
-& "scripts/everything_search.ps1" -Query "ext:png" -Type file -AsJson
+# Plain text search
+& "scripts/everything_search.ps1" -Query "settings.json" -Limit 10
 
-# 使用 Python 脚本获取 JSON 数据
-python "scripts/everything_search.py" "config.json" -p "C:\my-app" -n 10 --json
+# Search inside a specific folder with date sorting
+& "scripts/everything_search.ps1" -Query "*.log" -Path "C:\MyProject" -Sort dm -Limit 5
+
+# JSON output for automated agent consumption
+& "scripts/everything_search.ps1" -Query "ext:png" -Type file -AsJson
+```
+
+#### Python Helper (`scripts/everything_search.py`)
+
+```powershell
+# Plain text output
+python "scripts/everything_search.py" "config.json" -n 10
+
+# Scoped search with JSON output
+python "scripts/everything_search.py" "ext:py model" -p "C:\MyProject" -n 5 --json
+```
+
+**Sample JSON Output:**
+```json
+[
+  {
+    "filename": "C:\\MyProject\\src\\models\\user_model.py",
+    "size": "4096",
+    "date_modified": "2026/02/10 14:22"
+  }
+]
 ```
 
 ---
 
-## 仓库结构 / Project Layout
+## 🔍 Search Syntax Cheatsheet
+
+| Target | Everything Syntax | Description |
+|---|---|---|
+| **Multiple Extensions** | `ext:md;txt;json` | Semicolon-delimited file extensions |
+| **Size Filter** | `size:>500MB` or `size:1MB..50MB` | Supports `B`, `KB`, `MB`, `GB` |
+| **Date Modified** | `dm:today`, `dm:yesterday`, `dm:last7days` | Supports natural dates or years: `dm:2025` |
+| **Path Constraint** | `path:"C:\Workspace"` | Matches files residing inside matching path |
+| **Exact Filename** | `exact:Dockerfile` | Exact match without wildcard expansion |
+| **Wildcards** | `*service*.ts` | `*` matches 0+ chars, `?` matches 1 char |
+| **Logical AND** | `model user ext:py` | Space represents logical AND |
+| **Logical OR** | `*.jpg | *.png` | Pipe with spaces represents OR |
+| **Logical NOT** | `*.ts !*.test.ts` | Exclude matches with `!` |
+| **Regular Expression** | `es.exe -r "src\\api\\.*\.go$"` | Use `-r` flag for regex search |
+| **Case Sensitive** | `es.exe -i "README.md"` | Exact casing match |
+
+---
+
+## 📁 Repository Layout
 
 ```text
 everything-search-skill/
-├── SKILL.md                          # Agent Skill 核心规范与使用指示
-├── README.md                         # 项目说明文档
-├── LICENSE                           # MIT 开源协议
+├── SKILL.md                          # Standard Agent Skill specification file
+├── README.md                         # English Documentation
+├── README_zh.md                      # Chinese Documentation
+├── LICENSE                           # MIT License
 ├── bin/
-│   └── es.exe                        # Voidtools 官方轻量 CLI 工具
+│   └── es.exe                        # Voidtools official command-line tool
 └── scripts/
-    ├── install.ps1                   # 一键安装脚本
-    ├── everything_search.ps1         # PowerShell 包装脚本
-    └── everything_search.py          # Python 包装脚本
+    ├── install.ps1                   # One-click installation & PATH setup script
+    ├── everything_search.ps1         # PowerShell wrapper (CLI & JSON)
+    └── everything_search.py          # Python wrapper (CLI & JSON)
 ```
 
 ---
 
-## 许可证 / License
+## ❓ FAQ & Troubleshooting
 
-本项目基于 [MIT License](LICENSE) 开源发布。`es.exe` 由 Voidtools 拥有版权。
+### 1. `es.exe` error or returns nothing?
+Ensure the Everything GUI or service is running in the background. If not, start it:
+```powershell
+Start-Process "C:\Program Files\Everything\Everything.exe" -WindowStyle Minimized
+```
+
+### 2. PowerShell parser errors with `|`, `>`, or `;`?
+PowerShell reserves characters like `|` (pipeline), `>` (redirection), and `;` (statement separator). **Always quote queries in PowerShell:**
+```powershell
+# Right:
+es.exe -n 10 "ext:png;jpg" "size:>10MB"
+
+# Wrong:
+es.exe -n 10 ext:png;jpg size:>10MB
+```
+
+---
+
+## 📄 License
+
+This repository is licensed under the [MIT License](LICENSE).
+Voidtools Everything and `es.exe` are copyright © Voidtools.
