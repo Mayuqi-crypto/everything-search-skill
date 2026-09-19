@@ -7,7 +7,8 @@
 
 <p align="center">
   <a href="README_zh.md">🇨🇳 简体中文</a> |
-  <a href="README.md">🇬🇧 English</a>
+  <a href="README.md">🇬🇧 English</a> |
+  <a href="https://linux.do"><img src="https://img.shields.io/badge/社区-LINUX.DO-orange?style=flat&logo=linux" alt="LINUX DO"></a>
 </p>
 
 ---
@@ -179,6 +180,12 @@ es.exe -n 10 "ext:png;jpg" "size:>10MB"
 # 错误写法：
 es.exe -n 10 ext:png;jpg size:>10MB
 ```
+
+---
+
+## 🌐 社区交流 / Community
+
+本技能首发并分享于 [LINUX DO 社区 (https://linux.do)](https://linux.do) — 欢迎前往社区交流讨论与提出改进建议！
 
 ---
 
