@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>⚡ Ultra-fast, index-powered local file search skill for AI coding agents.</strong><br>
-  <span>Compatible with Cursor, Codex, PI-Desktop, Claude Desktop, and CLI agent environments.</span>
+  <span>Dual-mode architecture: HTTP REST API (for Sandboxed / Containerized Agents) + CLI Win32 IPC (Native Desktop).</span>
 </p>
 
 <p align="center">
@@ -13,38 +13,81 @@
 
 ---
 
-## 💡 Why Everything for AI Agents?
+## 💡 The Problem: Why Sandboxed Agents Fail with `es.exe`
 
-Traditional file discovery mechanisms used by AI agents (`Get-ChildItem -Recurse`, `find`, or unbounded globbing) suffer from severe limitations on Windows:
-- **Painfully Slow**: Recursively walking directories with thousands of dependencies (like `node_modules`, `.venv`, or build artifacts) can take tens of seconds or even minutes.
-- **High Resource Usage**: High CPU and disk I/O load while searching.
-- **Context Exhaustion**: Unfiltered tools often accidentally return massive file trees, flooding the LLM's context window and wasting thousands of tokens.
+AI coding agents running in isolated sandboxes, Docker containers, WSL2, or non-interactive background services frequently encounter this error when executing `es.exe`:
 
-**The Solution:**
-[Voidtools Everything](https://www.voidtools.com/) indexes NTFS USN Journals in memory. Queries typically execute in **less than 15 milliseconds** with virtually zero CPU footprint. This skill enables agents to leverage this instant index directly and safely.
+```text
+Error 8: Everything IPC window not found. Please make sure Everything is running.
+```
+
+### Why does this happen?
+- `es.exe` relies on Windows Desktop messaging (`WM_COPYDATA` Win32 IPC) to communicate with Everything's GUI window.
+- Windows security mechanisms (**User Interface Privilege Isolation / UIPI** and **Session 0 Isolation**) explicitly prohibit processes in sandboxes, containers, or background sessions from sending window messages across desktop session boundaries.
+
+---
+
+## 🛡️ The Solution: Dual-Mode Architecture
+
+This skill implements an **intelligent dual-mode fallback architecture**:
+
+```text
+                        ┌───────────────────────────────┐
+                        │ AI Agent (Python / PowerShell)│
+                        └──────────────┬────────────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+                    ▼                                     ▼
+        [Mode 1: HTTP REST API]                 [Mode 2: Win32 CLI]
+    (Sandboxes, Docker, WSL, Remote)            (Native User Desktop)
+                    │                                     │
+           GET http://host:8080/                   es.exe IPC Call
+                    │                                     │
+                    └──────────────────┬──────────────────┘
+                                       ▼
+                         Voidtools Everything Engine
+                           (Instant <15ms Results)
+```
+
+1. **HTTP REST Mode (Primary for Sandboxes & Containers)**:
+   - Everything includes a built-in, lightweight HTTP REST API.
+   - TCP network requests bypass Win32 UIPI/session isolation completely.
+   - Compatible with **Linux, macOS, WSL, Docker containers, and Windows Sandbox**.
+   - Implemented using **pure Python standard libraries** (zero third-party dependencies).
+2. **CLI IPC Mode (Automatic Fallback)**:
+   - If the HTTP port is not exposed and the agent runs in a native Windows desktop session, it automatically falls back to `es.exe`.
 
 ---
 
 ## ✨ Features
 
-- ⚡ **Sub-15ms Latency**: Real-time indexed file retrieval across all local drives (C:, D:, E:, etc.).
-- 🎯 **Scoped or Whole-Disk**: Search across entire drives or restrict boundaries to the current project/workspace using `-path`.
-- 🛡️ **Context Safe**: Built-in default limit guards (`-n 20`) prevent output dumps from exceeding LLM context windows.
-- 📊 **Dual Script Wrappers**: Includes both PowerShell (`everything_search.ps1`) and Python (`everything_search.py`) helpers with structured `--json` output.
-- 🔌 **Universal Compatibility**: Works out of the box with **Cursor**, **Codex**, **PI-Desktop**, and any custom agent tooling.
-- 📦 **Zero-Config Portable**: Self-contained `es.exe` included with one-click installer.
+- ⚡ **Sub-15ms Latency**: Query millions of indexed files across all NTFS drives in milliseconds.
+- 🐳 **Sandbox & Container Ready**: Works effortlessly inside Docker, WSL2, and isolated agent runners via host HTTP endpoint.
+- 🎯 **Scoped or Whole-Disk**: Restrict boundaries to current workspace via `-path` or search all connected drives.
+- 🛡️ **Context-Safe Pagination**: Built-in limits (`-n 20`) prevent output dumps from overflowing LLM context tokens.
+- 📊 **Structured JSON Output**: Built-in support for `--json` across both Python and PowerShell helpers.
+- 🔌 **Universal Agent Support**: Ready for **Cursor**, **Codex**, **PI-Desktop**, and custom agents.
 
 ---
 
 ## 🚀 Quick Start
 
-### Prerequisites
-1. Windows 10/11
-2. [Voidtools Everything](https://www.voidtools.com/) installed and running in the background.
+### 1. Enable Everything HTTP Server (One-Time Setup on Host)
+In Everything on your host Windows machine:
+1. Open Everything -> **Tools** (工具) -> **Options** (选项).
+2. Select **HTTP Server** (HTTP 服务器) on the left.
+3. Check **Enable HTTP Server** (启用 HTTP 服务器), set Port to `8080`, and click OK.
 
-### One-Click Installation
+*Alternatively, run the automated setup script:*
+```powershell
+.\scripts\enable_http.ps1 -Port 8080
+```
 
-Clone and run the automated installer:
+---
+
+### 2. One-Click Installation
+
+Clone and install into your agent environments:
 
 ```powershell
 git clone https://github.com/Mayuqi-crypto/everything-search-skill.git
@@ -53,95 +96,85 @@ cd everything-search-skill
 ```
 
 The installer will:
-1. Copy `es.exe` to `~/.local/bin/es.exe` and add it to your User `PATH`.
-2. Automatically deploy the skill into:
-   - `~/.agents/skills/everything-search/` (PI-Desktop / Agent environment)
-   - `~/.cursor/skills/everything-search/` (Cursor IDE)
-   - `~/.codex/skills/everything-search/` (Codex)
+1. Place `es.exe` into `~/.local/bin/` and configure your User `PATH`.
+2. Deploy the skill into `~/.agents/skills/`, `~/.cursor/skills/`, and `~/.codex/skills/`.
+
+---
+
+## 🐳 Sandboxed & Container Usage (Docker / WSL2)
+
+### From Docker Container
+Pass the host gateway to your container:
+```bash
+docker run -e EVERYTHING_HTTP_URL=http://host.docker.internal:8080 \
+           --add-host host.docker.internal:host-gateway \
+           my-agent-image
+```
+
+Inside container:
+```bash
+python scripts/everything_search.py "package.json" -n 10 --json
+```
+
+### From WSL2
+Point `EVERYTHING_HTTP_URL` to Windows host:
+```bash
+export EVERYTHING_HTTP_URL="http://$(ip route show | awk '/default/ {print $3}'):8080"
+python3 scripts/everything_search.py "ext:py model" -n 10
+```
 
 ---
 
 ## 🛠️ Usage & Examples
 
-### 1. Direct CLI Usage (`es.exe`)
+### 1. Dual-Mode Python Helper (`scripts/everything_search.py`)
 
-`es.exe` runs directly from any PowerShell or CMD prompt:
+```bash
+# Auto mode: Attempts HTTP first; falls back to CLI
+python scripts/everything_search.py "package.json" -n 20
+
+# Structured JSON output
+python scripts/everything_search.py "ext:tsx component" -n 10 --json
+
+# Restrict search to project folder
+python scripts/everything_search.py "main.py" -p "C:\Workspace\repo" -n 5
+
+# Force HTTP REST mode
+python scripts/everything_search.py "exact:Dockerfile" --mode http
+```
+
+### 2. Direct CLI Usage (`es.exe` in Native Sessions)
 
 ```powershell
-# Basic search with result count limit (CRITICAL: always use -n)
+# Always use -n to limit results!
 es.exe -n 20 "package.json"
 
-# Search inside a specific project or workspace folder
-es.exe -path "C:\path\to\repo" -n 20 "main.py"
+# Scope search to workspace folder
+es.exe -path "C:\my-repo" -n 20 "index.ts"
 
 # Files only (/a-d) or Folders only (/ad)
 es.exe /a-d -n 15 "ext:tsx component"
 es.exe /ad -n 10 "node_modules"
 
 # Sort by modification date (newest first)
-es.exe -sort-date-modified-descending -n 10 "ext:log"
-
-# Search by file size
-es.exe -sort-size-descending -n 10 "size:>100MB"
-```
-
-> **Warning**: Always include `-n <count>` (e.g. `-n 20`). Unbounded queries such as `es.exe *.txt` can match hundreds of thousands of files and exhaust the LLM's context.
-
----
-
-### 2. Helper Scripts (Structured Output)
-
-#### PowerShell Helper (`scripts/everything_search.ps1`)
-
-```powershell
-# Plain text search
-& "scripts/everything_search.ps1" -Query "settings.json" -Limit 10
-
-# Search inside a specific folder with date sorting
-& "scripts/everything_search.ps1" -Query "*.log" -Path "C:\MyProject" -Sort dm -Limit 5
-
-# JSON output for automated agent consumption
-& "scripts/everything_search.ps1" -Query "ext:png" -Type file -AsJson
-```
-
-#### Python Helper (`scripts/everything_search.py`)
-
-```powershell
-# Plain text output
-python "scripts/everything_search.py" "config.json" -n 10
-
-# Scoped search with JSON output
-python "scripts/everything_search.py" "ext:py model" -p "C:\MyProject" -n 5 --json
-```
-
-**Sample JSON Output:**
-```json
-[
-  {
-    "filename": "C:\\MyProject\\src\\models\\user_model.py",
-    "size": "4096",
-    "date_modified": "2026/02/10 14:22"
-  }
-]
+es.exe -sort-date-modified-descending -n 10 "ext:log dm:today"
 ```
 
 ---
 
-## 🔍 Search Syntax Cheatsheet
+## 🔍 Everything Search Syntax Cheatsheet
 
-| Target | Everything Syntax | Description |
+| Target | Syntax | Description |
 |---|---|---|
-| **Multiple Extensions** | `ext:md;txt;json` | Semicolon-delimited file extensions |
-| **Size Filter** | `size:>500MB` or `size:1MB..50MB` | Supports `B`, `KB`, `MB`, `GB` |
-| **Date Modified** | `dm:today`, `dm:yesterday`, `dm:last7days` | Supports natural dates or years: `dm:2025` |
-| **Path Constraint** | `path:"C:\Workspace"` | Matches files residing inside matching path |
-| **Exact Filename** | `exact:Dockerfile` | Exact match without wildcard expansion |
-| **Wildcards** | `*service*.ts` | `*` matches 0+ chars, `?` matches 1 char |
-| **Logical AND** | `model user ext:py` | Space represents logical AND |
-| **Logical OR** | `*.jpg | *.png` | Pipe with spaces represents OR |
-| **Logical NOT** | `*.ts !*.test.ts` | Exclude matches with `!` |
-| **Regular Expression** | `es.exe -r "src\\api\\.*\.go$"` | Use `-r` flag for regex search |
-| **Case Sensitive** | `es.exe -i "README.md"` | Exact casing match |
+| Multiple Extensions | `ext:md;txt;json` | Semicolon-delimited file extensions |
+| File Size | `size:>100MB` or `size:1MB..50MB` | Supports `B`, `KB`, `MB`, `GB` |
+| Date Modified | `dm:today`, `dm:last7days`, `dm:2025` | Relative or exact date filter |
+| Path Filter | `path:"C:\Workspace"` | Scope matches to specific parent path |
+| Exact Match | `exact:Dockerfile` | Exact match without wildcard expansion |
+| Logical AND | `model user ext:py` | Space represents AND |
+| Logical OR | `*.jpg | *.png` | Pipe with spaces represents OR |
+| Logical NOT | `*.ts !*.test.ts` | Exclude matches with `!` |
+| Regex | `es.exe -r "src\\api\\.*\.go$"` | Regular expression matching |
 
 ---
 
@@ -149,36 +182,17 @@ python "scripts/everything_search.py" "ext:py model" -p "C:\MyProject" -n 5 --js
 
 ```text
 everything-search-skill/
-├── SKILL.md                          # Standard Agent Skill specification file
+├── SKILL.md                          # Standard Agent Skill specification
 ├── README.md                         # English Documentation
 ├── README_zh.md                      # Chinese Documentation
 ├── LICENSE                           # MIT License
 ├── bin/
-│   └── es.exe                        # Voidtools official command-line tool
+│   └── es.exe                        # Voidtools official CLI tool
 └── scripts/
-    ├── install.ps1                   # One-click installation & PATH setup script
-    ├── everything_search.ps1         # PowerShell wrapper (CLI & JSON)
-    └── everything_search.py          # Python wrapper (CLI & JSON)
-```
-
----
-
-## ❓ FAQ & Troubleshooting
-
-### 1. `es.exe` error or returns nothing?
-Ensure the Everything GUI or service is running in the background. If not, start it:
-```powershell
-Start-Process "C:\Program Files\Everything\Everything.exe" -WindowStyle Minimized
-```
-
-### 2. PowerShell parser errors with `|`, `>`, or `;`?
-PowerShell reserves characters like `|` (pipeline), `>` (redirection), and `;` (statement separator). **Always quote queries in PowerShell:**
-```powershell
-# Right:
-es.exe -n 10 "ext:png;jpg" "size:>10MB"
-
-# Wrong:
-es.exe -n 10 ext:png;jpg size:>10MB
+    ├── install.ps1                   # One-click installation & PATH setup
+    ├── enable_http.ps1               # One-click HTTP Server configuration
+    ├── everything_search.ps1         # Dual-mode PowerShell wrapper
+    └── everything_search.py          # Dual-mode Python wrapper (Zero-dependency)
 ```
 
 ---

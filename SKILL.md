@@ -1,123 +1,130 @@
 ---
 name: everything-search
-description: Search files and folders instantly across Windows drives or within specific project paths using Everything (es.exe). Use whenever the user or task needs to search for files, locate documents/code/assets, find recently modified files, search by extension/size/date, or when standard Glob/Grep searches are slow or unindexed.
+description: Search files and folders instantly across Windows drives or within specific project paths using Everything (HTTP REST API or es.exe CLI). Supports sandboxed agents (Docker, WSL, DevContainers) and native desktop environments with automatic dual-mode fallback.
 ---
 
-# Everything Search
+# Everything Search (Dual-Mode: HTTP REST API & CLI)
 
-Fast, index-powered local file search using Voidtools Everything and its command-line interface (`es.exe`).
-Provides millisecond-latency searches across all NTFS drives or restricted to specific directory trees.
+Ultra-fast, index-powered local file search using Voidtools Everything.
+Supports both **HTTP REST API mode** (essential for sandboxed/containerized agents like Docker, WSL, DevContainers) and **native CLI mode** (`es.exe` Win32 IPC) with automatic fallback.
+
+---
+
+## Why Dual-Mode? (Solving Sandboxed Agent IPC Issues)
+
+When an AI agent runs inside a **sandbox**, **Docker container**, **WSL2**, or a **Session 0 background service**, calling `es.exe` directly often fails with:
+`Error 8: Everything IPC window not found. Please make sure Everything is running.`
+
+**Root Cause**: Windows enforces User Interface Privilege Isolation (UIPI) and Session Isolation. Sandboxed processes and non-interactive sessions cannot send Win32 `WM_COPYDATA` window messages to the host desktop session.
+
+**The Solution**:
+Everything provides a high-performance built-in **HTTP REST API**. Network calls (TCP) bypass Win32 UIPI/session isolation entirely:
+- **Sandboxed Agent / Container** ➡️ HTTP Request (`http://host.docker.internal:8080`) ➡️ Host Everything Index (Instant Results!)
+- **Native Desktop Session** ➡️ Automatic fallback to `es.exe` CLI if HTTP is disabled.
+
+---
 
 ## When to Use This Skill
 
 Use this skill whenever you need to:
-- Locate files or directories anywhere on local drives or within a project folder
-- Find files by name pattern, extension (e.g. `ext:md;json`), size, or modification date
-- Quickly locate missing configs, dependencies, project roots, or downloaded files
-- Replace slow recursive directory walking or deep file searches with instant index lookups
+- Locate files or directories instantly across local drives or inside a project directory
+- Search files in sandboxed environments (Docker, WSL, restricted agents) without IPC errors
+- Filter by name pattern, extension (`ext:ts;tsx`), size (`size:>100MB`), or date modified (`dm:today`)
+- Output structured JSON for automated pipelines without token-costly directory walks
 
 ---
 
-## Quick Start (Direct CLI)
+## Quick Start: Python Dual-Mode Helper (Recommended)
 
-`es.exe` is pre-installed in the user's PATH (`~/.local/bin/es.exe`) and linked to the active Everything service.
+The skill includes `scripts/everything_search.py`, which uses **only Python standard libraries** (zero external dependencies like `requests`).
+
+```bash
+# Auto mode: Attempts HTTP on port 8080 first; falls back to es.exe CLI automatically
+python scripts/everything_search.py "package.json" -n 20
+
+# Structured JSON output
+python scripts/everything_search.py "ext:py model" -n 10 --json
+
+# Restrict search to a specific directory
+python scripts/everything_search.py "main.go" -p "C:\MyProject" -n 5
+
+# Explicitly force HTTP REST mode
+python scripts/everything_search.py "exact:Dockerfile" --mode http
+
+# Specify custom host/port (e.g. from Docker container to host)
+python scripts/everything_search.py "*.json" --url "http://host.docker.internal:8080" -n 10
+```
+
+---
+
+## Sandboxed & Container Environment Configuration
+
+### 1. Enable HTTP Server on Windows Host (One-time Setup)
+In Everything on the host machine:
+1. Open Everything -> **Tools** (工具) -> **Options** (选项).
+2. Click **HTTP Server** (HTTP 服务器) in the left menu.
+3. Check **Enable HTTP Server** (启用 HTTP 服务器), set Port to `8080`, and click OK.
+*(Optional: run `scripts/enable_http.ps1` to configure automatically).*
+
+### 2. Connect from Docker Container
+Run your Docker container with host access:
+```bash
+docker run -e EVERYTHING_HTTP_URL=http://host.docker.internal:8080 --add-host host.docker.internal:host-gateway ...
+```
+Inside the container:
+```python
+python scripts/everything_search.py "ext:rs" -n 10 --json
+```
+
+### 3. Connect from WSL2
+Inside WSL, resolve the Windows host IP:
+```bash
+export EVERYTHING_HTTP_URL="http://$(ip route show | awk '/default/ {print $3}'):8080"
+python3 scripts/everything_search.py "ext:md" -n 10
+```
+
+---
+
+## Direct CLI Usage (`es.exe` for Native Desktop Sessions)
+
+When running directly in a native Windows user desktop session:
 
 ```powershell
-# Basic search with result count limit (ALWAYS set -n to preserve context tokens)
-es.exe -n 20 "filename_or_pattern"
+# Basic search (ALWAYS specify -n to prevent flooding LLM context)
+es.exe -n 20 "settings.json"
 
-# Search within a specific folder or project
-es.exe -path "C:\path\to\project" -n 20 "main.py"
+# Search inside project folder
+es.exe -path "C:\my-repo" -n 20 "index.ts"
 
 # Files only (/a-d) or Folders only (/ad)
 es.exe /a-d -n 15 "ext:tsx component"
 es.exe /ad -n 10 "node_modules"
 
 # Sort by date modified (newest first)
-es.exe -sort-date-modified-descending -n 10 "ext:log"
-```
-
-> **CRITICAL RULE**: Always include `-n <count>` (e.g. `-n 20` or `-n 50`) when running `es.exe`. Unbounded queries like `es.exe *.txt` can dump hundreds of thousands of paths and exhaust context windows.
-
----
-
-## Helper Scripts (Structured / JSON Output)
-
-The skill includes pre-built helper scripts with automatic binary discovery, path scoping, and JSON formatting:
-
-### PowerShell Helper
-```powershell
-# Plain text results
-& "~/.agents/skills/everything-search/scripts/everything_search.ps1" -Query "package.json" -Limit 10
-
-# Search within folder with date modified desc
-& "~/.agents/skills/everything-search/scripts/everything_search.ps1" -Query "*.log" -Path "C:\MyProject" -Sort dm -Limit 5
-
-# JSON output for structured parsing
-& "~/.agents/skills/everything-search/scripts/everything_search.ps1" -Query "ext:png" -Type file -AsJson
-```
-
-### Python Helper
-```powershell
-# Text list
-python "~/.agents/skills/everything-search/scripts/everything_search.py" "config.json" -n 10
-
-# JSON output
-python "~/.agents/skills/everything-search/scripts/everything_search.py" "ext:py model" -p "C:\MyProject" -n 5 --json
+es.exe -sort-date-modified-descending -n 10 "ext:log dm:today"
 ```
 
 ---
 
 ## Everything Search Syntax Cheatsheet
 
-Combine terms with spaces for logical AND.
-
-| Goal | Syntax Example | Notes |
+| Filter | Syntax | Example |
 |---|---|---|
-| Extension | `ext:md;txt;doc` | Semicolon separates multiple extensions |
-| File size | `size:>100MB` or `size:1MB..50MB` | Supports `B`, `KB`, `MB`, `GB` |
-| Date modified | `dm:today`, `dm:yesterday`, `dm:last7days` | Or specific year/date: `dm:2025` |
-| Exact folder path | `path:"C:\Projects\web"` | Scopes search to paths containing string |
-| Exact filename | `exact:Dockerfile` | Exact match without wildcards |
-| Wildcards | `*setup*.py` | `*` matches zero or more chars, `?` matches one |
-| OR condition | `*.jpg | *.png` | Space pipe space |
-| NOT condition | `*.ts !*.test.ts` | Exclude test files |
-| Regex search | `es.exe -r "src\\components\\.*\.tsx$"` | Use `-r` flag for regex |
-| Case sensitive | `es.exe -i "README.md"` | Match exact casing |
+| Multiple extensions | `ext:<ext1;ext2>` | `ext:md;txt;json` |
+| File size | `size:>100MB` or `size:1MB..10MB` | `size:>500MB /a-d` |
+| Date modified | `dm:<time>` | `dm:today`, `dm:last7days`, `dm:2025` |
+| Exact match | `exact:<name>` | `exact:Dockerfile` |
+| Logical AND | `space` | `auth controller ext:go` |
+| Logical OR | `|` (with spaces) | `*.jpg | *.png` |
+| Logical NOT | `!` | `*.ts !*.test.ts` |
+| Regex search | `-r` flag | `es.exe -r "src\\api\\.*\.go$"` |
 
 ---
 
-## Common Workflows
+## Environment Variables
 
-### 1. Locate a project or config file across drives
-```powershell
-es.exe -n 10 "exact:settings.json"
-```
-
-### 2. Find recently updated log files
-```powershell
-es.exe -sort-date-modified-descending -n 10 "ext:log dm:today"
-```
-
-### 3. Find large files consuming disk space
-```powershell
-es.exe -sort-size-descending -n 15 "size:>500MB /a-d"
-```
-
-### 4. Locate all tests in a project
-```powershell
-es.exe -path "C:\path\to\repo" -n 30 "*.test.ts;*.spec.ts"
-```
-
----
-
-## Troubleshooting
-
-1. **"Everything.exe is not running"**:
-   - Everything requires its lightweight background service/process to maintain its index.
-   - Start it via PowerShell: `Start-Process "C:\Program Files\Everything\Everything.exe" -WindowStyle Minimized`
-2. **`es.exe` not found**:
-   - Ensure `C:\Users\Saber\.local\bin\es.exe` exists or reference the skill's fallback binary `~/.agents/skills/everything-search/bin/es.exe`.
-3. **Escaping special characters in PowerShell**:
-   - In PowerShell, quote expressions containing `|`, `;`, or `>`:
-     `es.exe -n 10 "ext:js;ts" "size:>10MB"`
+| Variable | Default | Purpose |
+|---|---|---|
+| `EVERYTHING_HTTP_URL` | `http://127.0.0.1:8080` | URL of Everything HTTP service |
+| `EVERYTHING_HTTP_USER` | `""` | Optional Basic Auth username |
+| `EVERYTHING_HTTP_PASS` | `""` | Optional Basic Auth password |

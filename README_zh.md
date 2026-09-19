@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>⚡ 基于 Everything 的毫秒级本地文件索引与检索技能，专为 AI 编程智能体设计。</strong><br>
-  <span>全面兼容 Cursor、Codex、PI-Desktop、Claude Desktop 以及自定义 Agent 环境。</span>
+  <span>创新双模架构：HTTP REST API（专治沙箱 / 容器 IPC 隔离）+ CLI Win32 IPC（原生桌面极致直通）。</span>
 </p>
 
 <p align="center">
@@ -13,36 +13,79 @@
 
 ---
 
-## 💡 为什么 AI Agent 需要 Everything？
+## 💡 核心痛点：为什么沙箱里的 Agent 调用 `es.exe` 会报 IPC 错误？
 
-AI 编程助手在 Windows 下常用的传统文件查找手段（如递归扫描 `Get-ChildItem -Recurse`、逐层 `find` 或模糊 Glob 遍历）存在诸多痛点：
-- **速度极慢**：遇到包含海量依赖（如 `node_modules`、`.venv`、构建产物等）的项目时，递归遍历动辄几十秒甚至数分钟。
-- **资源占用高**：磁盘 I/O 和 CPU 占用瞬间飙升，容易卡顿。
-- **Token 爆炸**：由于没有索引过滤，容易一次性返回成千上万条冗余文件路径，不仅耗费巨量 Token，甚至直接挤爆 Agent 的上下文窗口。
+当 AI 编程智能体运行在 **受限沙箱（Sandbox）**、**Docker 容器**、**WSL2** 或 **Windows 后台服务（Session 0）** 中时，执行 `es.exe` 常常会遇到以下报错：
 
-**解决方案：**
-[Voidtools Everything](https://www.voidtools.com/) 在内存中建立 NTFS USN 实时变动索引。搜索全盘数百万文件通常在 **15 毫秒内** 完成，CPU 与磁盘占用几乎为零。本技能让 AI Agent 能够安全、规范、高效地直接调用 Everything 索引。
+```text
+Error 8: Everything IPC window not found. Please make sure Everything is running.
+```
+
+### 原因剖析：
+- `es.exe` 依赖 Windows 窗口消息（Win32 `WM_COPYDATA` IPC）与 Everything 宿主桌面的 GUI 窗口通信。
+- Windows 系统的 **UIPI 权限隔离（User Interface Privilege Isolation）** 与 **会话隔离（Session Isolation）** 严禁任何来自沙箱、低完整性级别容器或不同桌面会话的进程向宿主发送窗口消息，导致 IPC 通道被系统级阻断。
 
 ---
 
-## ✨ 核心特性
+## 🛡️ 解决方案：智能双模降级架构 (Dual-Mode)
 
-- ⚡ **毫秒级极速检索**：全盘（C/D/E等所有磁盘）秒级响应，无需等待。
-- 🎯 **全局或范围限定**：既支持全盘快速查找，也支持通过 `-path` 严格限定在当前工作区或某个项目目录内。
-- 🛡️ **智能上下文保护**：内置强制数量限制规则（默认 `-n 20`），彻底避免海量结果冲垮大模型上下文。
-- 📊 **双语言脚本封装**：附带 PowerShell (`everything_search.ps1`) 与 Python (`everything_search.py`) 包装脚本，支持一键输出标准 JSON 格式。
-- 🔌 **多平台即插即用**：开箱即用支持 **Cursor**、**Codex**、**PI-Desktop** 及任何支持 Agent Skill 的环境。
-- 📦 **免配置便携部署**：自带官方 `es.exe` CLI 与一键自动化安装脚本。
+针对上述痛点，本技能设计了**网络 HTTP 与本地 CLI 智能双模架构**：
+
+```text
+                        ┌───────────────────────────────┐
+                        │ AI Agent (Python / PowerShell)│
+                        └──────────────┬────────────────┘
+                                       │
+                    ┌──────────────────┴──────────────────┐
+                    ▼                                     ▼
+        【模式一：HTTP REST API】                【模式二：Win32 CLI】
+     (适用：沙箱、Docker、WSL、远程等)            (适用：Windows 原生桌面会话)
+                    │                                     │
+           GET http://host:8080/                   es.exe IPC 调用
+                    │                                     │
+                    └──────────────────┬──────────────────┘
+                                       ▼
+                         Voidtools Everything 索引内核
+                           (毫秒级 <15ms 返回结果)
+```
+
+1. **HTTP REST API 模式（沙箱与容器优先）**：
+   - Everything 自带轻量、高并发的 HTTP REST 服务。
+   - 基于标准 TCP 网络请求，**彻底绕过 Windows Win32 UIPI 与桌面会话隔离限制**。
+   - 跨平台兼容：**Linux、macOS、WSL、Docker 容器内部均可直接访问宿主机器上的 Everything 索引**。
+   - Python 封装采用**原生纯标准库**编写，零外部第三方包依赖（无需 `requests`）。
+2. **CLI IPC 模式（无感自动降级）**：
+   - 若宿主机未开启 HTTP 端口，且 Agent 运行在 Windows 本地原生桌面会话，自动无缝回退调用 `es.exe`。
+
+---
+
+## ✨ 特性亮点
+
+- ⚡ **毫秒级极速检索**：全盘（C/D/E等所有磁盘）秒级响应，告别卡顿的递归扫描。
+- 🐳 **沙箱与容器即插即用**：完美打通 Docker、WSL2、DevContainer，不再受 IPC 窗口报错困扰。
+- 🎯 **全局或范围限定**：支持全盘扫描，也支持通过 `-path` 严格限定在当前工作区内。
+- 🛡️ **智能上下文保护**：内置默认数量限制（`-n 20`），彻底防止文件树打爆大模型上下文 Token。
+- 📊 **双语言结构化输出**：PowerShell 与 Python 脚本均原生支持 `--json` 输出。
+- 🔌 **多平台即插即用**：开箱即用支持 **Cursor**、**Codex**、**PI-Desktop** 及各类自主开发 Agent。
 
 ---
 
 ## 🚀 快速上手
 
-### 前置条件
-1. Windows 10/11 系统。
-2. 已安装并后台运行 [Voidtools Everything](https://www.voidtools.com/)。
+### 1. 在宿主机开启 Everything HTTP 服务（只需配置一次）
+在宿主 Windows 的 Everything 界面中：
+1. 打开 Everything -> **工具 (Tools)** -> **选项 (Options)**。
+2. 在左侧列表点击 **HTTP 服务器 (HTTP Server)**。
+3. 勾选 **启用 HTTP 服务器 (Enable HTTP Server)**，端口填写 `8080`，点击确定。
 
-### 一键安装
+*或者直接运行自动化配置脚本：*
+```powershell
+.\scripts\enable_http.ps1 -Port 8080
+```
+
+---
+
+### 2. 一键安装技能
 
 克隆仓库并运行一键安装脚本：
 
@@ -52,96 +95,84 @@ cd everything-search-skill
 .\scripts\install.ps1
 ```
 
-安装脚本将自动完成：
-1. 将 `es.exe` 复制到 `~/.local/bin/es.exe` 并确保该路径已添加至当前用户的环境变量 `PATH`。
-2. 自动将技能同步并部署到：
-   - `~/.agents/skills/everything-search/`（PI-Desktop / 本地 Agent 运行时）
-   - `~/.cursor/skills/everything-search/`（Cursor 编辑器）
-   - `~/.codex/skills/everything-search/`（Codex）
+安装脚本会自动将 `es.exe` 添加至系统 PATH，并将技能部署至 `~/.agents/skills/`、`~/.cursor/skills/` 与 `~/.codex/skills/`。
+
+---
+
+## 🐳 沙箱与容器环境调用指南 (Docker / WSL2)
+
+### 1. Docker 容器中调用
+启动容器时挂载宿主机网关并注入环境变量：
+```bash
+docker run -e EVERYTHING_HTTP_URL=http://host.docker.internal:8080 \
+           --add-host host.docker.internal:host-gateway \
+           my-agent-image
+```
+
+在容器内部即可畅快搜索：
+```bash
+python scripts/everything_search.py "package.json" -n 10 --json
+```
+
+### 2. WSL2 子系统中调用
+将 `EVERYTHING_HTTP_URL` 指向宿主机 Windows IP：
+```bash
+export EVERYTHING_HTTP_URL="http://$(ip route show | awk '/default/ {print $3}'):8080"
+python3 scripts/everything_search.py "ext:py model" -n 10
+```
 
 ---
 
 ## 🛠️ 使用方式与命令示例
 
-### 1. 直接命令行调用 (`es.exe`)
+### 1. 双模 Python 脚本（推荐跨环境使用）
 
-可在任何 PowerShell 或 CMD 窗口直接调用：
+```bash
+# 自动模式：自动探测 HTTP 端口，失败自动降级为 CLI
+python scripts/everything_search.py "package.json" -n 20
+
+# 获取结构化 JSON 数据
+python scripts/everything_search.py "ext:tsx component" -n 10 --json
+
+# 限定在当前项目文件夹内搜索
+python scripts/everything_search.py "main.py" -p "C:\Workspace\repo" -n 5
+
+# 强制使用 HTTP REST API 模式
+python scripts/everything_search.py "exact:Dockerfile" --mode http
+```
+
+### 2. 原生命令行调用 (`es.exe` 本地桌面使用)
 
 ```powershell
-# 基础搜索（关键规则：务必带上 -n 限制返回数量）
+# 务必带上 -n 限制返回条数！
 es.exe -n 20 "package.json"
 
-# 限定在当前工作区或指定项目目录内搜索
-es.exe -path "C:\path\to\repo" -n 20 "main.py"
+# 限定在工作区目录内搜索
+es.exe -path "C:\my-repo" -n 20 "index.ts"
 
 # 仅搜文件 (/a-d) 或 仅搜文件夹 (/ad)
 es.exe /a-d -n 15 "ext:tsx component"
 es.exe /ad -n 10 "node_modules"
 
-# 按最后修改时间倒序排列（最新修改的文件排在最前）
-es.exe -sort-date-modified-descending -n 10 "ext:log"
-
-# 按文件大小倒序排列
-es.exe -sort-size-descending -n 10 "size:>100MB"
-```
-
-> **注意**：进行搜索时务必加上 `-n <数量>`（如 `-n 20`）。若直接运行无限制查询（例如 `es.exe *.txt`），可能匹配几十万条结果并打满 Agent 上下文。
-
----
-
-### 2. 辅助脚本（结构化 JSON 输出）
-
-#### PowerShell 脚本 (`scripts/everything_search.ps1`)
-
-```powershell
-# 普通纯文本结果
-& "scripts/everything_search.ps1" -Query "settings.json" -Limit 10
-
-# 在指定文件夹内搜索并按时间倒序
-& "scripts/everything_search.ps1" -Query "*.log" -Path "C:\MyProject" -Sort dm -Limit 5
-
-# 输出 JSON 格式，供 Agent 或代码直接反序列化处理
-& "scripts/everything_search.ps1" -Query "ext:png" -Type file -AsJson
-```
-
-#### Python 脚本 (`scripts/everything_search.py`)
-
-```powershell
-# 纯文本输出
-python "scripts/everything_search.py" "config.json" -n 10
-
-# 指定路径并输出 JSON
-python "scripts/everything_search.py" "ext:py model" -p "C:\MyProject" -n 5 --json
-```
-
-**JSON 输出样例：**
-```json
-[
-  {
-    "filename": "C:\\MyProject\\src\\models\\user_model.py",
-    "size": "4096",
-    "date_modified": "2026/02/10 14:22"
-  }
-]
+# 按最后修改时间倒序排列
+es.exe -sort-date-modified-descending -n 10 "ext:log dm:today"
 ```
 
 ---
 
-## 🔍 Everything 核心搜索语法速查表
+## 🔍 Everything 核心搜索语法速查
 
-| 搜索目标 | Everything 语法 | 语法说明 |
+| 搜索目标 | 语法示例 | 说明 |
 |---|---|---|
-| **多扩展名** | `ext:md;txt;json` | 用分号 `;` 分隔多个后缀 |
-| **文件大小范围** | `size:>500MB` 或 `size:1MB..50MB` | 支持单位 `B`, `KB`, `MB`, `GB` |
-| **修改时间** | `dm:today`、`dm:yesterday`、`dm:last7days` | 支持自然时间或特定年份如 `dm:2025` |
-| **限定所在路径** | `path:"C:\Workspace"` | 匹配位于该路径下的文件 |
-| **精确文件名** | `exact:Dockerfile` | 精确匹配，不使用通配符 |
-| **通配符** | `*service*.ts` | `*` 匹配任意字符，`?` 匹配单个字符 |
-| **逻辑 与 (AND)** | `model user ext:py` | 空格即代表逻辑与 |
-| **逻辑 或 (OR)** | `*.jpg | *.png` | 竖线左右带空格代表逻辑或 |
-| **逻辑 非 (NOT)** | `*.ts !*.test.ts` | 叹号 `!` 代表排除 |
-| **正则表达式** | `es.exe -r "src\\api\\.*\.go$"` | 使用 `-r` 参数进行正则匹配 |
-| **区分大小写** | `es.exe -i "README.md"` | 精确匹配英文字母大小写 |
+| **多扩展名** | `ext:md;txt;json` | 用分号 `;` 分隔后缀 |
+| **文件大小范围** | `size:>100MB` 或 `size:1MB..50MB` | 支持 `B`, `KB`, `MB`, `GB` |
+| **修改时间** | `dm:today`、`dm:last7days`、`dm:2025` | 相对时间或指定年份 |
+| **限定路径** | `path:"C:\Workspace"` | 限定在该目录及子目录下 |
+| **精确匹配** | `exact:Dockerfile` | 精确匹配，不使用通配符 |
+| **逻辑与 (AND)** | `model user ext:py` | 空格即代表逻辑与 |
+| **逻辑或 (OR)** | `*.jpg | *.png` | 竖线左右带空格代表逻辑或 |
+| **逻辑非 (NOT)** | `*.ts !*.test.ts` | 叹号 `!` 代表排除 |
+| **正则表达式** | `es.exe -r "src\\api\\.*\.go$"` | 正则匹配 |
 
 ---
 
@@ -149,36 +180,17 @@ python "scripts/everything_search.py" "ext:py model" -p "C:\MyProject" -n 5 --js
 
 ```text
 everything-search-skill/
-├── SKILL.md                          # 遵循标准的 Agent Skill 定义规范
+├── SKILL.md                          # Agent Skill 核心规范定义
 ├── README.md                         # 英文说明文档
 ├── README_zh.md                      # 中文说明文档
-├── LICENSE                           # MIT 开源授权协议
+├── LICENSE                           # MIT 开源协议
 ├── bin/
 │   └── es.exe                        # Voidtools 官方轻量命令行工具
 └── scripts/
     ├── install.ps1                   # 一键安装配置脚本
-    ├── everything_search.ps1         # PowerShell 包装脚本 (支持 JSON/路径限定)
-    └── everything_search.py          # Python 包装脚本 (跨语言/结构化支持)
-```
-
----
-
-## ❓ 常见问题与排查
-
-### 1. 运行 `es.exe` 报错或无返回？
-Everything 需要在后台运行一个轻量级的服务/进程以提供实时索引通信。如果未启动，可通过以下命令启动：
-```powershell
-Start-Process "C:\Program Files\Everything\Everything.exe" -WindowStyle Minimized
-```
-
-### 2. 在 PowerShell 中遇到 `|`、`>` 或 `;` 报错？
-PowerShell 中字符 `|`（管道符）、`>`（重定向符）和 `;`（语句分隔符）属于特殊保留字符。**在 PowerShell 中传参时请始终加上双引号：**
-```powershell
-# 正确写法：
-es.exe -n 10 "ext:png;jpg" "size:>10MB"
-
-# 错误写法：
-es.exe -n 10 ext:png;jpg size:>10MB
+    ├── enable_http.ps1               # 宿主机一键开启 HTTP 服务脚本
+    ├── everything_search.ps1         # 支持 HTTP 与 CLI 双模的 PowerShell 包装脚本
+    └── everything_search.py          # 零依赖跨平台双模 Python 包装脚本
 ```
 
 ---
@@ -191,5 +203,5 @@ es.exe -n 10 ext:png;jpg size:>10MB
 
 ## 📄 开源许可证
 
-本项目基于 [MIT License](LICENSE) 协议发布。
+本项目基于 [MIT License](LICENSE) 协议开源发布。
 Voidtools Everything 与 `es.exe` 版权归 Voidtools 官方所有。
