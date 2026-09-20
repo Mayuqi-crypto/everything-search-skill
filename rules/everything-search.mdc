@@ -1,0 +1,16 @@
+---
+description: Mandatory rule to prioritize Everything for file search and discovery
+globs: *
+alwaysApply: true
+---
+
+# File Search & Discovery Override (MANDATORY)
+
+Whenever you need to search, find, or locate files, directories, dependencies, configs, or project assets:
+
+- ❌ **STRICTLY FORBIDDEN**: Do NOT use slow, unbounded recursive commands such as `Get-ChildItem -Recurse`, `dir /s`, `find`, or deep unbounded `Glob` across large directories (e.g. `node_modules`, build outputs).
+- ✅ **MANDATORY**: ALWAYS prioritize and use **`everything-search`**:
+  - Direct CLI: `es.exe -n 20 "<query>"` (ALWAYS pass `-n` limit!).
+  - Project scoped: `es.exe -path "<workspace>" -n 20 "<query>"`.
+  - Python wrapper (Dual-Mode): `python ~/.agents/skills/everything-search/scripts/everything_search.py "<query>" -n 20`
+  - In Sandboxed/Docker environments: Use the HTTP REST mode via `EVERYTHING_HTTP_URL` to avoid Win32 IPC errors.
